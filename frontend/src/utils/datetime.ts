@@ -1,10 +1,10 @@
 /**
  * 日期时间工具函数
- * 统一处理 UTC 时间转换为本地时间（UTC+8）
+ * 统一处理时间格式化，支持UTC时间和本地时间（UTC+8）
  */
 
 /**
- * 格式化时间字符串，自动处理 UTC 时间转换
+ * 格式化时间字符串，自动处理时区转换
  * @param dateStr - 时间字符串或时间戳
  * @param options - 格式化选项
  * @returns 格式化后的时间字符串
@@ -16,26 +16,37 @@ export function formatDateTime(
   if (!dateStr) return '-'
   
   try {
-    let timeStr: string
+    let date: Date
     
     // 处理时间戳（秒或毫秒）
     if (typeof dateStr === 'number') {
       // 如果是秒级时间戳（小于 10000000000），转换为毫秒
       const timestamp = dateStr < 10000000000 ? dateStr * 1000 : dateStr
-      timeStr = new Date(timestamp).toISOString()
+      date = new Date(timestamp)
     } else {
-      timeStr = String(dateStr).trim()
+      const timeStr = String(dateStr).trim()
+      
+      // 检查是否有时区标识
+      const hasTimezone = timeStr.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(timeStr)
+      
+      if (hasTimezone) {
+        // 有时区标识，直接解析
+        date = new Date(timeStr)
+      } else {
+        // 没有时区标识，假设是 UTC 时间（后端通常存储 UTC 时间）
+        // 后端返回的时间格式如：2025-11-03T14:31:24.182244
+        // 这种情况通常是 UTC 时间，需要添加 Z 标识
+        if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+          // 添加 Z 标识，表示这是 UTC 时间
+          date = new Date(timeStr + 'Z')
+        } else {
+          // 其他格式，尝试直接解析
+          date = new Date(timeStr)
+        }
+      }
     }
     
-    // 如果时间字符串没有时区标识，假定为UTC时间，添加Z后缀
-    if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !timeStr.endsWith('Z') && !timeStr.includes('+')) {
-      timeStr += 'Z'
-    }
-    
-    // 解析UTC时间
-    const utcDate = new Date(timeStr)
-    
-    if (isNaN(utcDate.getTime())) {
+    if (isNaN(date.getTime())) {
       console.warn('无效的时间格式:', dateStr)
       return String(dateStr)
     }
@@ -56,7 +67,7 @@ export function formatDateTime(
     const finalOptions = { ...defaultOptions, ...options }
     
     // 格式化为中国本地时间（UTC+8）
-    return utcDate.toLocaleString('zh-CN', finalOptions)
+    return date.toLocaleString('zh-CN', finalOptions)
   } catch (e) {
     console.error('时间格式化错误:', e, dateStr)
     return String(dateStr)
@@ -72,24 +83,33 @@ export function formatDateTimeWithRelative(dateStr: string | number | null | und
   if (!dateStr) return '-'
   
   try {
-    let timeStr: string
+    let date: Date
     
     // 处理时间戳
     if (typeof dateStr === 'number') {
       const timestamp = dateStr < 10000000000 ? dateStr * 1000 : dateStr
-      timeStr = new Date(timestamp).toISOString()
+      date = new Date(timestamp)
     } else {
-      timeStr = String(dateStr).trim()
+      const timeStr = String(dateStr).trim()
+      
+      // 检查是否有时区标识
+      const hasTimezone = timeStr.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(timeStr)
+      
+      if (hasTimezone) {
+        // 有时区标识，直接解析
+        date = new Date(timeStr)
+      } else {
+        // 没有时区标识，假设是 UTC 时间（后端通常存储 UTC 时间）
+        if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+          // 添加 Z 标识，表示这是 UTC 时间
+          date = new Date(timeStr + 'Z')
+        } else {
+          date = new Date(timeStr)
+        }
+      }
     }
     
-    // 如果时间字符串没有时区标识，假定为UTC时间，添加Z后缀
-    if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !timeStr.endsWith('Z') && !timeStr.includes('+')) {
-      timeStr += 'Z'
-    }
-    
-    const utcDate = new Date(timeStr)
-    
-    if (isNaN(utcDate.getTime())) {
+    if (isNaN(date.getTime())) {
       console.warn('无效的时间格式:', dateStr)
       return String(dateStr)
     }
@@ -98,13 +118,13 @@ export function formatDateTimeWithRelative(dateStr: string | number | null | und
     const now = new Date()
     
     // 计算时间差
-    const diff = now.getTime() - utcDate.getTime()
+    const diff = now.getTime() - date.getTime()
     const days = Math.floor(diff / (1000 * 60 * 60 * 24))
     const hours = Math.floor(diff / (1000 * 60 * 60))
     const minutes = Math.floor(diff / (1000 * 60))
     
     // 格式化为中国本地时间
-    const formatted = utcDate.toLocaleString('zh-CN', {
+    const formatted = date.toLocaleString('zh-CN', {
       timeZone: 'Asia/Shanghai',
       year: 'numeric',
       month: '2-digit',
@@ -172,23 +192,32 @@ export function formatRelativeTime(dateStr: string | number | null | undefined):
   if (!dateStr) return '-'
 
   try {
-    let timeStr: string
+    let targetDate: Date
 
     // 处理时间戳
     if (typeof dateStr === 'number') {
       const timestamp = dateStr < 10000000000 ? dateStr * 1000 : dateStr
-      timeStr = new Date(timestamp).toISOString()
+      targetDate = new Date(timestamp)
     } else {
-      timeStr = String(dateStr).trim()
+      const timeStr = String(dateStr).trim()
+      
+      // 检查是否有时区标识
+      const hasTimezone = timeStr.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(timeStr)
+      
+      if (hasTimezone) {
+        // 有时区标识，直接解析
+        targetDate = new Date(timeStr)
+      } else {
+        // 没有时区标识，假设是 UTC 时间（后端通常存储 UTC 时间）
+        if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+          // 添加 Z 标识，表示这是 UTC 时间
+          targetDate = new Date(timeStr + 'Z')
+        } else {
+          targetDate = new Date(timeStr)
+        }
+      }
     }
-
-    // 如果时间字符串没有时区标识，假定为UTC时间，添加Z后缀
-    if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !timeStr.endsWith('Z') && !timeStr.includes('+')) {
-      timeStr += 'Z'
-    }
-
-    const targetDate = new Date(timeStr)
-
+    
     if (isNaN(targetDate.getTime())) {
       console.warn('无效的时间格式:', dateStr)
       return String(dateStr)

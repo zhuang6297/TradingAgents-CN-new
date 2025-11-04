@@ -56,6 +56,10 @@ class TaskState:
         if self.end_time:
             data['end_time'] = self.end_time.isoformat()
 
+        # 确保 parameters 字段始终存在（如果为 None，设置为空字典）
+        if data.get('parameters') is None:
+            data['parameters'] = {}
+
         # 添加实时计算的时间信息
         if self.start_time:
             if self.end_time:
@@ -185,7 +189,8 @@ class MemoryStateManager:
         message: Optional[str] = None,
         current_step: Optional[str] = None,
         result_data: Optional[Dict[str, Any]] = None,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        tokens_used: Optional[int] = None
     ) -> bool:
         """更新任务状态"""
         with self._lock:
@@ -211,8 +216,13 @@ class MemoryStateManager:
                     logger.info(f"🔍 [MEMORY] decision内容: {result_data['decision']}")
 
                 task.result_data = result_data
+                # 从 result_data 中提取 tokens_used（如果存在）
+                if tokens_used is None and isinstance(result_data, dict):
+                    tokens_used = result_data.get("tokens_used")
             if error_message is not None:
                 task.error_message = error_message
+            if tokens_used is not None:
+                task.tokens_used = tokens_used
                 
             # 如果任务完成或失败，设置结束时间
             if status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:

@@ -121,9 +121,9 @@ class DevConfig:
 
         if debug:
             # 开发环境：减少噪音日志
-            logging.getLogger("watchfiles").setLevel(logging.ERROR)
-            logging.getLogger("watchfiles.main").setLevel(logging.ERROR)
-            logging.getLogger("watchfiles.watcher").setLevel(logging.ERROR)
+            # logging.getLogger("watchfiles").setLevel(logging.ERROR)
+            # logging.getLogger("watchfiles.main").setLevel(logging.ERROR)
+            # logging.getLogger("watchfiles.watcher").setLevel(logging.ERROR)
 
             # 确保重要日志正常显示
             logging.getLogger("webapi").setLevel(logging.INFO)

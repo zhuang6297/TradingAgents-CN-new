@@ -138,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { DataAnalysis, Refresh, Document, Upload, Download, Money } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -199,10 +199,13 @@ const getCurrencySymbol = (currency: string) => {
 const loadStatistics = async () => {
   try {
     const res = await getUsageStatistics({ days: selectedDays.value })
-    if (res.data.success) {
-      statistics.value = res.data.data
+    if (res.success) {
+      statistics.value = res.data
+      // 等待DOM更新后渲染图表
       await nextTick()
-      renderCharts()
+      setTimeout(() => {
+        renderCharts()
+      }, 100)
     }
   } catch (error) {
     console.error('加载统计数据失败:', error)
@@ -217,9 +220,9 @@ const loadRecords = async () => {
     const res = await getUsageRecords({
       limit: pageSize.value
     })
-    if (res.data.success) {
-      records.value = res.data.data.records
-      totalRecords.value = res.data.data.total
+    if (res.success) {
+      records.value = res.data.records
+      totalRecords.value = res.data.total
     }
   } catch (error) {
     console.error('加载使用记录失败:', error)
@@ -249,15 +252,33 @@ const renderProviderChart = () => {
     providerChart = echarts.init(providerChartRef.value)
   }
 
-  const data = Object.entries(statistics.value.by_provider).map(([name, value]: [string, any]) => ({
+  const providerData = statistics.value.by_provider || {}
+  const data = Object.entries(providerData).map(([name, value]: [string, any]) => ({
     name,
-    value: value.cost
+    value: value?.cost || 0
   }))
+
+  if (data.length === 0) {
+    providerChart.setOption({
+      title: {
+        text: '暂无数据',
+        left: 'center',
+        top: 'center',
+        textStyle: {
+          color: '#909399',
+          fontSize: 14
+        }
+      }
+    })
+    return
+  }
 
   const option = {
     tooltip: {
       trigger: 'item',
-      formatter: '{b}: ¥{c} ({d}%)'
+      formatter: (params: any) => {
+        return `${params.name}: ${params.value.toFixed(4)}元 (${params.percent}%)`
+      }
     },
     legend: {
       orient: 'vertical',
@@ -281,6 +302,7 @@ const renderProviderChart = () => {
   }
 
   providerChart.setOption(option)
+  providerChart.resize()
 }
 
 // 渲染模型图表
@@ -291,19 +313,39 @@ const renderModelChart = () => {
     modelChart = echarts.init(modelChartRef.value)
   }
 
-  const data = Object.entries(statistics.value.by_model)
+  const modelData = statistics.value.by_model || {}
+  const data = Object.entries(modelData)
     .map(([name, value]: [string, any]) => ({
-      name,
-      value: value.cost
+      name: name.replace(/^[^/]+\//, ''), // 移除供应商前缀，只显示模型名
+      value: value?.cost || 0
     }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10) // 只显示前10个
+
+  if (data.length === 0) {
+    modelChart.setOption({
+      title: {
+        text: '暂无数据',
+        left: 'center',
+        top: 'center',
+        textStyle: {
+          color: '#909399',
+          fontSize: 14
+        }
+      }
+    })
+    return
+  }
 
   const option = {
     tooltip: {
       trigger: 'axis',
       axisPointer: {
         type: 'shadow'
+      },
+      formatter: (params: any) => {
+        const param = params[0]
+        return `${param.name}: ${param.value.toFixed(4)}元`
       }
     },
     xAxis: {
@@ -330,6 +372,7 @@ const renderModelChart = () => {
   }
 
   modelChart.setOption(option)
+  modelChart.resize()
 }
 
 // 渲染每日成本图表
@@ -340,16 +383,40 @@ const renderDailyChart = () => {
     dailyChart = echarts.init(dailyChartRef.value)
   }
 
-  const sortedData = Object.entries(statistics.value.by_date)
+  const dateData = statistics.value.by_date || {}
+  const sortedData = Object.entries(dateData)
     .sort(([a], [b]) => a.localeCompare(b))
+
+  if (sortedData.length === 0) {
+    dailyChart.setOption({
+      title: {
+        text: '暂无数据',
+        left: 'center',
+        top: 'center',
+        textStyle: {
+          color: '#909399',
+          fontSize: 14
+        }
+      }
+    })
+    return
+  }
 
   const option = {
     tooltip: {
-      trigger: 'axis'
+      trigger: 'axis',
+      formatter: (params: any) => {
+        const param = params[0]
+        return `${param.name}<br/>成本: ${param.value.toFixed(4)}元`
+      }
     },
     xAxis: {
       type: 'category',
-      data: sortedData.map(([date]) => date)
+      data: sortedData.map(([date]) => {
+        // 格式化日期显示
+        const d = new Date(date)
+        return `${d.getMonth() + 1}/${d.getDate()}`
+      })
     },
     yAxis: {
       type: 'value',
@@ -357,7 +424,7 @@ const renderDailyChart = () => {
     },
     series: [
       {
-        data: sortedData.map(([, value]: [string, any]) => value.cost),
+        data: sortedData.map(([, value]: [string, any]) => value?.cost || 0),
         type: 'line',
         smooth: true,
         itemStyle: {
@@ -371,6 +438,7 @@ const renderDailyChart = () => {
   }
 
   dailyChart.setOption(option)
+  dailyChart.resize()
 }
 
 // 删除旧记录
@@ -387,8 +455,8 @@ const handleDeleteOldRecords = async () => {
     )
 
     const res = await deleteOldRecords(90)
-    if (res.data.success) {
-      ElMessage.success(`已删除 ${res.data.data.deleted_count} 条旧记录`)
+    if (res.success) {
+      ElMessage.success(`已删除 ${res.data.deleted_count} 条旧记录`)
       loadData()
     }
   } catch (error: any) {
@@ -399,9 +467,25 @@ const handleDeleteOldRecords = async () => {
   }
 }
 
+// 窗口大小改变时调整图表
+const handleResize = () => {
+  providerChart?.resize()
+  modelChart?.resize()
+  dailyChart?.resize()
+}
+
 // 组件挂载
 onMounted(() => {
   loadData()
+  window.addEventListener('resize', handleResize)
+})
+
+// 组件卸载
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  providerChart?.dispose()
+  modelChart?.dispose()
+  dailyChart?.dispose()
 })
 </script>
 

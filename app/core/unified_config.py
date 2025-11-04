@@ -9,26 +9,29 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
 import asyncio
-from dataclasses import dataclass, asdict
-
 from app.models.config import (
     LLMConfig, DataSourceConfig, DatabaseConfig, SystemConfig,
     ModelProvider, DataSourceType, DatabaseType
 )
 
 
-@dataclass
 class ConfigPaths:
     """配置文件路径"""
-    root_config_dir: Path = Path("config")
-    tradingagents_config_dir: Path = Path("tradingagents/config")
-    webapi_config_dir: Path = Path("data/config")
-    
-    # 具体配置文件
-    models_json: Path = root_config_dir / "models.json"
-    settings_json: Path = root_config_dir / "settings.json"
-    pricing_json: Path = root_config_dir / "pricing.json"
-    verified_models_json: Path = root_config_dir / "verified_models.json"
+    def __init__(self):
+        # 获取项目根目录（app/core/unified_config.py 的父目录的父目录）
+        current_file = Path(__file__).resolve()
+        project_root = current_file.parent.parent.parent
+        
+        # 配置文件目录（支持多个位置，按优先级）
+        self.root_config_dir: Path = project_root / "config"
+        self.tradingagents_config_dir: Path = project_root / "tradingagents" / "config"
+        self.webapi_config_dir: Path = project_root / "data" / "config"
+        
+        # 具体配置文件（优先使用项目根目录下的 config/）
+        self.models_json: Path = self.root_config_dir / "models.json"
+        self.settings_json: Path = self.root_config_dir / "settings.json"
+        self.pricing_json: Path = self.root_config_dir / "pricing.json"
+        self.verified_models_json: Path = self.root_config_dir / "verified_models.json"
 
 
 class UnifiedConfigManager:
@@ -56,37 +59,87 @@ class UnifiedConfigManager:
         
         return current_mtime <= cached_mtime
     
+    def _resolve_config_path(self, file_path: Path) -> Path:
+        """解析配置文件路径，支持多个可能的位置"""
+        # 如果文件已经存在，直接返回
+        if file_path.exists():
+            return file_path
+        
+        # 获取项目根目录
+        current_file = Path(__file__).resolve()
+        project_root = current_file.parent.parent.parent
+        
+        # 如果已经是绝对路径但不存在，尝试查找相对于项目根目录的位置
+        if file_path.is_absolute():
+            # 提取文件名
+            file_name = file_path.name
+            # 尝试项目根目录下的 config/ 目录
+            config_path = project_root / "config" / file_name
+            if config_path.exists():
+                return config_path
+        else:
+            # 相对路径：尝试多个可能的位置
+            possible_paths = [
+                project_root / file_path,  # 项目根目录下的相对路径
+                project_root / "config" / file_path.name,  # 项目根目录下的 config/ 目录
+                file_path.resolve(),  # 基于当前工作目录的绝对路径
+            ]
+            
+            # 返回第一个存在的路径
+            for path in possible_paths:
+                if path.exists():
+                    return path
+        
+        # 如果都不存在，返回项目根目录下的 config/ 目录中的路径（用于创建新文件）
+        return project_root / "config" / file_path.name
+    
     def _load_json_file(self, file_path: Path, cache_key: str = None) -> Dict[str, Any]:
         """加载JSON文件，支持缓存"""
-        if cache_key and self._is_cache_valid(cache_key, file_path):
+        # 解析实际的文件路径
+        resolved_path = self._resolve_config_path(file_path)
+        
+        # 检查文件是否存在
+        if not resolved_path.exists():
+            print(f"⚠️  配置文件不存在: {file_path} (解析后路径: {resolved_path})")
+            return {}
+        
+        if cache_key and self._is_cache_valid(cache_key, resolved_path):
             return self._cache[cache_key]
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(resolved_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
             if cache_key:
                 self._cache[cache_key] = data
-                self._last_modified[cache_key] = self._get_file_mtime(file_path)
+                self._last_modified[cache_key] = self._get_file_mtime(resolved_path)
             
             return data
         except FileNotFoundError:
+            print(f"⚠️  配置文件不存在: {resolved_path}")
             return {}
         except json.JSONDecodeError as e:
-            print(f"配置文件格式错误 {file_path}: {e}")
+            print(f"❌ 配置文件格式错误 {resolved_path}: {e}")
             return {}
     
     def _save_json_file(self, file_path: Path, data: Dict[str, Any], cache_key: str = None):
         """保存JSON文件"""
+        # 解析实际的文件路径（如果文件不存在，会返回项目根目录下的 config/ 目录路径）
+        resolved_path = self._resolve_config_path(file_path)
+        
         # 确保目录存在
-        file_path.parent.mkdir(parents=True, exist_ok=True)
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
-        if cache_key:
-            self._cache[cache_key] = data
-            self._last_modified[cache_key] = self._get_file_mtime(file_path)
+        try:
+            with open(resolved_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            if cache_key:
+                self._cache[cache_key] = data
+                self._last_modified[cache_key] = self._get_file_mtime(resolved_path)
+        except Exception as e:
+            print(f"❌ 保存配置文件失败 {resolved_path}: {e}")
+            raise
     
     # ==================== 模型配置管理 ====================
     

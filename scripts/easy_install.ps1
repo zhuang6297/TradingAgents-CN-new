@@ -170,7 +170,7 @@ function Install-Dependencies {
         foreach ($mirror in $mirrors) {
             Write-Info "尝试使用镜像: $mirror"
             try {
-                pip install -e . -i $mirror --quiet
+                python -m pip install --upgrade pip --quiet$mirror --quiet
                 Write-Success "依赖安装成功"
                 return $true
             }

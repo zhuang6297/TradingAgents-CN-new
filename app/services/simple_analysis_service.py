@@ -593,6 +593,8 @@ class SimpleAnalysisService:
 
             try:
                 db = get_mongo_db()
+                # 准备 parameters 数据（转换为字典格式）
+                parameters_dict = request.parameters.model_dump() if request.parameters else {}
                 result = await db.analysis_tasks.update_one(
                     {"task_id": task_id},
                     {"$setOnInsert": {
@@ -603,6 +605,7 @@ class SimpleAnalysisService:
                         "stock_name": name,
                         "status": "pending",
                         "progress": 0,
+                        "parameters": parameters_dict,  # 保存 parameters 字段
                         "created_at": datetime.utcnow(),
                     }},
                     upsert=True
@@ -1756,6 +1759,7 @@ class SimpleAnalysisService:
             logger.info(f"📋 [Tasks] 从 MongoDB 读取历史任务")
             mongo_tasks: List[Dict[str, Any]] = []
             count = 0
+            db = None
             try:
                 db = get_mongo_db()
 
@@ -1801,6 +1805,17 @@ class SimpleAnalysisService:
                     count += 1
                     # 兼容 user_id 或 user 字段
                     user_field_val = doc.get("user_id", doc.get("user"))
+                    # 从 result 字段中提取 execution_time 和 tokens_used（如果顶层没有）
+                    result_data = doc.get("result") or {}
+                    execution_time = doc.get("execution_time")
+                    tokens_used = doc.get("tokens_used")
+                    
+                    # 如果顶层没有，从 result 字段中获取
+                    if execution_time is None and isinstance(result_data, dict):
+                        execution_time = result_data.get("execution_time")
+                    if tokens_used is None and isinstance(result_data, dict):
+                        tokens_used = result_data.get("tokens_used")
+                    
                     item = {
                         "task_id": doc.get("task_id"),
                         "user_id": str(user_field_val) if user_field_val is not None else None,
@@ -1813,10 +1828,10 @@ class SimpleAnalysisService:
                         "start_time": doc.get("started_at") or doc.get("created_at"),
                         "end_time": doc.get("completed_at"),
                         "parameters": doc.get("parameters", {}),
-                        "execution_time": doc.get("execution_time"),
-                        "tokens_used": doc.get("tokens_used"),
+                        "execution_time": execution_time,
+                        "tokens_used": tokens_used,
                         # 为兼容前端，这里沿用 memory_manager 的字段名
-                        "result_data": doc.get("result"),
+                        "result_data": result_data,
                     }
                     # 时间格式转为 ISO 字符串
                     for k in ("start_time", "end_time"):
@@ -1847,6 +1862,66 @@ class SimpleAnalysisService:
             # 转换为列表并按时间排序
             merged_tasks = list(task_dict.values())
             merged_tasks.sort(key=lambda x: x.get('start_time', ''), reverse=True)
+
+            # 确保所有任务都有 parameters 字段（兼容旧数据）
+            # 同时确保 execution_time 和 tokens_used 字段正确（从 result_data 中提取）
+            for task in merged_tasks:
+                if 'parameters' not in task or task.get('parameters') is None:
+                    task['parameters'] = {}
+                
+                # 如果 execution_time 或 tokens_used 为 None，尝试从 result_data 中获取
+                result_data = task.get('result_data') or {}
+                if isinstance(result_data, dict):
+                    if task.get('execution_time') is None:
+                        task['execution_time'] = result_data.get('execution_time')
+                    if task.get('tokens_used') is None:
+                        task['tokens_used'] = result_data.get('tokens_used')
+
+            # 5) 从 analysis_reports 关联查询 performance_metrics 数据
+            try:
+                if db is None:
+                    db = get_mongo_db()
+                    
+                task_ids = [task.get("task_id") for task in merged_tasks if task.get("task_id")]
+                if task_ids:
+                    logger.info(f"📊 [Tasks] 准备从 analysis_reports 查询 performance_metrics: {len(task_ids)} 个任务")
+                    reports_cursor = db.analysis_reports.find(
+                        {"task_id": {"$in": task_ids}},
+                        {"task_id": 1, "performance_metrics": 1}
+                    )
+                    
+                    # 构建 task_id -> performance_metrics 的映射
+                    performance_metrics_map = {}
+                    async for report_doc in reports_cursor:
+                        task_id = report_doc.get("task_id")
+                        if task_id:
+                            performance_metrics = report_doc.get("performance_metrics") or {}
+                            performance_metrics_map[task_id] = performance_metrics
+                    
+                    logger.info(f"📊 [Tasks] 从 analysis_reports 获取到 {len(performance_metrics_map)} 条 performance_metrics 数据")
+                    
+                    # 将 performance_metrics 数据添加到对应的任务中
+                    for task in merged_tasks:
+                        task_id = task.get("task_id")
+                        if task_id and task_id in performance_metrics_map:
+                            perf_metrics = performance_metrics_map[task_id]
+                            
+                            # 添加 total_time（优先使用 performance_metrics.total_time，否则使用 execution_time）
+                            if perf_metrics.get("total_time") is not None:
+                                task["execution_time"] = perf_metrics.get("total_time")
+                            
+                            # 添加 analysis_model（从 llm_config.deep_think_model 获取）
+                            llm_config = perf_metrics.get("llm_config") or {}
+                            deep_think_model = llm_config.get("deep_think_model")
+                            if deep_think_model:
+                                task["analysis_model"] = deep_think_model
+                            
+                            # 可选：保存完整的 performance_metrics 对象供前端使用
+                            task["performance_metrics"] = perf_metrics
+                            
+            except Exception as perf_e:
+                logger.warning(f"⚠️ [Tasks] 查询 performance_metrics 失败: {perf_e}", exc_info=True)
+                # 查询失败不影响主流程，继续执行
 
             # 分页
             results = merged_tasks[offset:offset + limit]
@@ -2161,26 +2236,35 @@ class SimpleAnalysisService:
             if result_insert.inserted_id:
                 logger.info(f"✅ 分析报告已保存到MongoDB analysis_reports: {analysis_id}")
 
-                # 同时更新analysis_tasks集合中的result字段，保持API兼容性
+                # 同时更新analysis_tasks集合中的result字段和顶层字段，保持API兼容性
+                execution_time_val = result.get("execution_time", 0)
+                tokens_used_val = result.get("tokens_used", 0)
+                
                 await db.analysis_tasks.update_one(
                     {"task_id": task_id},
-                    {"$set": {"result": {
-                        "analysis_id": analysis_id,
-                        "stock_symbol": stock_symbol,
-                        "stock_code": result.get('stock_code', stock_symbol),
-                        "analysis_date": result.get('analysis_date'),
-                        "summary": result.get("summary", ""),
-                        "recommendation": result.get("recommendation", ""),
-                        "confidence_score": result.get("confidence_score", 0.0),
-                        "risk_level": result.get("risk_level", "中等"),
-                        "key_points": result.get("key_points", []),
-                        "detailed_analysis": result.get("detailed_analysis", {}),
-                        "execution_time": result.get("execution_time", 0),
-                        "tokens_used": result.get("tokens_used", 0),
-                        "reports": reports,  # 包含提取的报告内容
-                        # 🔥 关键修复：添加格式化后的decision字段！
-                        "decision": result.get("decision", {})
-                    }}}
+                    {"$set": {
+                        # 顶层字段（方便查询）
+                        "execution_time": execution_time_val,
+                        "tokens_used": tokens_used_val,
+                        # result 字段（保持兼容性）
+                        "result": {
+                            "analysis_id": analysis_id,
+                            "stock_symbol": stock_symbol,
+                            "stock_code": result.get('stock_code', stock_symbol),
+                            "analysis_date": result.get('analysis_date'),
+                            "summary": result.get("summary", ""),
+                            "recommendation": result.get("recommendation", ""),
+                            "confidence_score": result.get("confidence_score", 0.0),
+                            "risk_level": result.get("risk_level", "中等"),
+                            "key_points": result.get("key_points", []),
+                            "detailed_analysis": result.get("detailed_analysis", {}),
+                            "execution_time": execution_time_val,
+                            "tokens_used": tokens_used_val,
+                            "reports": reports,  # 包含提取的报告内容
+                            # 🔥 关键修复：添加格式化后的decision字段！
+                            "decision": result.get("decision", {})
+                        }
+                    }}
                 )
                 logger.info(f"💾 分析结果已保存 (web风格): {task_id}")
             else:

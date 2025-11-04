@@ -209,8 +209,9 @@ watch(width, (newWidth) => {
   min-height: calc(100vh - 60px - 60px); // 减去header和footer高度
 
   .content-wrapper {
-    max-width: 1400px;
-    margin: 0 auto;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
   }
 }
 

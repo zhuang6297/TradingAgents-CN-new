@@ -15,8 +15,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 def setup_logging():
     """设置日志配置"""
     # 设置watchfiles日志级别为WARNING，减少文件变化日志
-    logging.getLogger("watchfiles").setLevel(logging.WARNING)
-    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
+    # logging.getLogger("watchfiles").setLevel(logging.WARNING)
+    # logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
 
     # 设置uvicorn日志级别
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)

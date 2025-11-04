@@ -319,9 +319,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Setting, CircleCheck } from '@element-plus/icons-vue'
+import { configApi } from '@/api/config'
 
 // 类型定义
 interface DataSourceConfig {
@@ -392,30 +393,43 @@ const wizardData = ref<WizardData>({
   }
 })
 
-// 可用模型列表
+// 从后端获取的模型列表
+const llmConfigs = ref<any[]>([])
+const loadingModels = ref(false)
+
+// 加载模型列表
+const loadModels = async () => {
+  if (loadingModels.value) return
+  
+  try {
+    loadingModels.value = true
+    const configs = await configApi.getLLMConfigs()
+    llmConfigs.value = configs.filter((config: any) => config.enabled)
+    console.log('✅ 配置向导：模型列表加载成功，数量:', llmConfigs.value.length)
+  } catch (error) {
+    console.error('❌ 配置向导：加载模型列表失败:', error)
+    ElMessage.warning('加载模型列表失败，将使用默认模型')
+  } finally {
+    loadingModels.value = false
+  }
+}
+
+// 可用模型列表（从后端获取）
 const availableModels = computed(() => {
   const provider = wizardData.value.llm.provider
-  const models: Record<string, Array<{ label: string; value: string }>> = {
-    deepseek: [
-      { label: 'deepseek-chat', value: 'deepseek-chat' },
-      { label: 'deepseek-coder', value: 'deepseek-coder' }
-    ],
-    dashscope: [
-      { label: 'qwen-turbo', value: 'qwen-turbo' },
-      { label: 'qwen-plus', value: 'qwen-plus' },
-      { label: 'qwen-max', value: 'qwen-max' }
-    ],
-    openai: [
-      { label: 'gpt-3.5-turbo', value: 'gpt-3.5-turbo' },
-      { label: 'gpt-4', value: 'gpt-4' },
-      { label: 'gpt-4-turbo', value: 'gpt-4-turbo' }
-    ],
-    google: [
-      { label: 'gemini-pro', value: 'gemini-pro' },
-      { label: 'gemini-2.5-pro', value: 'gemini-2.5-pro' }
-    ]
+  if (!provider) {
+    return []
   }
-  return models[provider] || []
+  
+  // 从后端获取的模型列表中筛选出对应厂家的已启用模型
+  const models = llmConfigs.value
+    .filter((config: any) => config.provider === provider && config.enabled)
+    .map((config: any) => ({
+      label: config.model_display_name || config.model_name,
+      value: config.model_name
+    }))
+  
+  return models
 })
 
 // 数据源相关的计算属性，用于双向绑定
@@ -437,6 +451,20 @@ const datasourceApiKey = computed({
   get: () => wizardData.value.datasource.apiKey,
   set: (value: string) => {
     wizardData.value.datasource.apiKey = value
+  }
+})
+
+// 监听对话框打开，加载模型列表
+watch(visible, (newVal) => {
+  if (newVal && llmConfigs.value.length === 0) {
+    loadModels()
+  }
+})
+
+// 组件挂载时加载模型列表
+onMounted(() => {
+  if (visible.value) {
+    loadModels()
   }
 })
 

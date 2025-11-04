@@ -322,7 +322,7 @@ class StockDataPreparer:
                             break
 
                 # 检查是否为有效的股票名称
-                if stock_name != "未知" and not stock_name.startswith(f"股票{stock_code}"):
+                if stock_name != "未知" and stock_name.startswith(f"股票{stock_code}"):
                     has_basic_info = True
                     logger.info(f"✅ [A股数据] 基本信息获取成功: {stock_code} - {stock_name}")
                     cache_status += "基本信息已缓存; "

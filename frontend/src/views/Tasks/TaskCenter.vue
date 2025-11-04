@@ -10,10 +10,10 @@
 
     <el-card class="tabs-card" shadow="never">
       <el-tabs v-model="activeTab" @tab-click="onTabChange">
+        <el-tab-pane label="全部" name="all" />
         <el-tab-pane label="进行中" name="running" />
         <el-tab-pane label="已完成" name="completed" />
         <el-tab-pane label="失败" name="failed" />
-        <el-tab-pane label="全部" name="all" />
       </el-tabs>
     </el-card>
 
@@ -85,9 +85,7 @@
 
       <el-table :data="filteredList" v-loading="loading" style="width: 100%" @selection-change="onSelectionChange">
         <el-table-column type="selection" width="50" />
-        <el-table-column prop="task_id" label="任务ID" width="220" />
         <el-table-column prop="stock_code" label="股票代码" width="120" />
-        <el-table-column prop="stock_name" label="股票名称" width="150" />
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
@@ -101,6 +99,40 @@
         <el-table-column prop="start_time" label="开始时间" width="180">
           <template #default="{ row }">
             {{ formatTime(row.start_time || row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="任务耗时" width="120">
+          <template #default="{ row }">
+            {{ formatDuration(row.estimated_total_time || row.execution_time) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作建议" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.result_data?.decision?.action" :type="getActionType(row.result_data.decision.action)">
+              {{ row.result_data.decision.action }}
+            </el-tag>
+            <span v-else class="text-placeholder">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="置信度" width="100">
+          <template #default="{ row }">
+            <span v-if="row.result_data?.decision?.confidence !== undefined && row.result_data?.decision?.confidence !== null">
+              {{ (row.result_data.decision.confidence * 100).toFixed(0) }}%
+            </span>
+            <span v-else class="text-placeholder">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="分析模型" width="250">
+          <template #default="{ row }">
+            {{ row.analysis_model || row.parameters?.deep_analysis_model || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="Token消耗" width="120">
+          <template #default="{ row }">
+            <span v-if="row.tokens_used !== null && row.tokens_used !== undefined">
+              {{ formatNumber(row.tokens_used) }}
+            </span>
+            <span v-else class="text-placeholder">-</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
@@ -160,7 +192,7 @@ const renderMarkdown = (s: string) => {
 
 const router = useRouter()
 
-const activeTab = ref<'running'|'completed'|'failed'|'all'>('running')
+const activeTab = ref<'running'|'completed'|'failed'|'all'>('all')
 const loading = ref(false)
 const keyword = ref('')
 const currentPage = ref(1)
@@ -280,10 +312,16 @@ const currentRow = ref<any>(null)
 const openResult = async (row:any) => {
   currentRow.value = row
   try {
-    const res = await analysisApi.getTaskResult(row.task_id)
-    const body = (res as any)?.data?.data || {}
-    currentResult.value = body
-    resultVisible.value = true
+    // 优先使用列表项中的 result_data，如果没有再调用 API
+    if (row.result_data) {
+      currentResult.value = row.result_data
+      resultVisible.value = true
+    } else {
+      const res = await analysisApi.getTaskResult(row.task_id)
+      const body = (res as any)?.data?.data || {}
+      currentResult.value = body
+      resultVisible.value = true
+    }
   } catch (e:any) {
     ElMessage.error('获取结果失败')
   }
@@ -393,6 +431,46 @@ import { formatDateTime } from '@/utils/datetime'
 
 const getStatusText = (status:string) => ({ pending:'等待中', processing:'处理中', completed:'已完成', failed:'失败', cancelled:'已取消' } as any)[status] || status
 const formatTime = (t:string) => t ? formatDateTime(t) : '-'
+
+// 格式化耗时（秒转xx时xx分xx秒）
+// 如果不足60分钟，只显示xx分（不显示秒）
+const formatDuration = (seconds: number | null | undefined): string => {
+  if (seconds === null || seconds === undefined || isNaN(seconds)) {
+    return '-'
+  }
+  
+  const totalSeconds = Math.floor(seconds)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const secs = totalSeconds % 60
+  
+  if (hours > 0) {
+    // 有小时（>=60分钟），显示xx时xx分xx秒
+    return `${hours}时${minutes}分${secs}秒`
+  } else if (minutes > 0) {
+    // 不足60分钟，只显示xx分（不显示秒）
+    return `${minutes}分`
+  } else {
+    // 只有秒（<1分钟）
+    return `${secs}秒`
+  }
+}
+
+// 获取操作建议的标签类型
+const getActionType = (action: string): 'success' | 'danger' | 'warning' | 'info' => {
+  const actionMap: Record<string, 'success' | 'danger' | 'warning' | 'info'> = {
+    '买入': 'success',
+    '卖出': 'danger',
+    '持有': 'warning',
+    '观望': 'info'
+  }
+  return actionMap[action] || 'info'
+}
+
+// 格式化数字（添加千分位）
+const formatNumber = (num: number): string => {
+  return num.toLocaleString('zh-CN')
+}
 </script>
 
 <style scoped lang="scss">
@@ -403,6 +481,10 @@ const formatTime = (t:string) => t ? formatDateTime(t) : '-'
   .tabs-card { margin-bottom: 16px; }
   .list-header { display:flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap:8px; }
   .pagination-wrapper { display:flex; justify-content:center; margin-top: 16px; }
+  
+  .text-placeholder {
+    color: var(--el-text-color-placeholder);
+  }
 }
 </style>
 

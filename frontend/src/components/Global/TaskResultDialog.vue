@@ -2,9 +2,9 @@
   <el-dialog v-model="visible" title="任务结果" width="60%">
     <div v-if="result">
       <h4>建议</h4>
-      <div class="markdown-content" v-html="renderMarkdown(result.recommendation || '无')"></div>
+      <div class="markdown-content" v-html="renderMarkdown(getRecommendation() || '无')"></div>
       <h4 style="margin-top: 16px;">摘要</h4>
-      <div class="markdown-content" v-html="renderMarkdown(result.summary || '无')"></div>
+      <div class="markdown-content" v-html="renderMarkdown(getSummary() || '无')"></div>
     </div>
     <template #footer>
       <el-button @click="emit('close')">关闭</el-button>
@@ -27,5 +27,27 @@ const visible = computed({
 
 marked.setOptions({ breaks: true, gfm: true })
 const renderMarkdown = (s: string) => { try { return marked.parse(s||'') as string } catch { return s } }
+
+// 获取建议：优先使用 result.recommendation，如果没有则尝试从 result_data.recommendation 获取
+const getRecommendation = () => {
+  if (!props.result) return ''
+  // 优先使用顶层 recommendation
+  if (props.result.recommendation) return props.result.recommendation
+  // 尝试从 result_data 中获取
+  if (props.result.result_data?.recommendation) return props.result.result_data.recommendation
+  return ''
+}
+
+// 获取摘要：优先使用 result.summary，如果没有则尝试从 result_data.decision.reasoning 获取
+const getSummary = () => {
+  if (!props.result) return ''
+  // 优先使用顶层 summary
+  if (props.result.summary) return props.result.summary
+  // 尝试从 result_data.decision.reasoning 获取
+  // if (props.result.decision?.reasoning) return props.result.decision.reasoning
+  // 尝试从 result_data.summary 获取
+  // if (props.result.result_data?.summary) return props.result.result_data.summary
+  return ''
+}
 </script>
 

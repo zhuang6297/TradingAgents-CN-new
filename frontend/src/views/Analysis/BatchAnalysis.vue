@@ -345,17 +345,71 @@ const clearStocks = () => {
   invalidCodes.value = []
 }
 
+// 从可用模型列表中选择合适的默认模型
+const selectDefaultModel = (models: any[], preferredModel: string | null, role: 'quick' | 'deep'): string | null => {
+  if (!models || models.length === 0) return null
+  
+  // 如果首选模型存在且已启用，使用它
+  if (preferredModel) {
+    const preferred = models.find(m => m.model_name === preferredModel)
+    if (preferred) {
+      return preferred.model_name
+    }
+  }
+  
+  // 根据角色选择合适的模型
+  if (role === 'quick') {
+    // 优先选择适合快速分析的模型
+    const quickModels = models.filter(m => 
+      m.suitable_roles?.includes('quick_analysis') || 
+      m.suitable_roles?.includes('both') ||
+      (m.capability_level && m.capability_level <= 2)
+    )
+    if (quickModels.length > 0) {
+      quickModels.sort((a, b) => (a.capability_level || 5) - (b.capability_level || 5))
+      return quickModels[0].model_name
+    }
+  } else {
+    // 优先选择适合深度分析的模型
+    const deepModels = models.filter(m => 
+      m.suitable_roles?.includes('deep_analysis') || 
+      m.suitable_roles?.includes('both') ||
+      (m.capability_level && m.capability_level >= 3)
+    )
+    if (deepModels.length > 0) {
+      deepModels.sort((a, b) => (b.capability_level || 1) - (a.capability_level || 1))
+      return deepModels[0].model_name
+    }
+  }
+  
+  // 如果都没有匹配的，返回第一个可用模型
+  return models[0].model_name
+}
+
 // 初始化模型设置
 const initializeModelSettings = async () => {
   try {
-    // 获取默认模型
-    const defaultModels = await configApi.getDefaultModels()
-    modelSettings.value.quickAnalysisModel = defaultModels.quick_analysis_model
-    modelSettings.value.deepAnalysisModel = defaultModels.deep_analysis_model
-
-    // 获取所有可用的模型列表
+    // 先获取所有可用的模型列表
     const llmConfigs = await configApi.getLLMConfigs()
     availableModels.value = llmConfigs.filter((config: any) => config.enabled)
+
+    // 获取默认模型配置
+    const defaultModels = await configApi.getDefaultModels()
+    
+    // 验证并选择实际存在的模型
+    const quickModel = selectDefaultModel(
+      availableModels.value,
+      defaultModels.quick_analysis_model,
+      'quick'
+    )
+    const deepModel = selectDefaultModel(
+      availableModels.value,
+      defaultModels.deep_analysis_model,
+      'deep'
+    )
+    
+    modelSettings.value.quickAnalysisModel = quickModel || ''
+    modelSettings.value.deepAnalysisModel = deepModel || ''
 
     console.log('✅ 加载模型配置成功:', {
       quick: modelSettings.value.quickAnalysisModel,
@@ -364,9 +418,14 @@ const initializeModelSettings = async () => {
     })
   } catch (error) {
     console.error('加载默认模型配置失败:', error)
-    // 使用硬编码的默认值
-    modelSettings.value.quickAnalysisModel = 'qwen-turbo'
-    modelSettings.value.deepAnalysisModel = 'qwen-max'
+    // 如果加载失败，尝试从可用模型列表中选择
+    if (availableModels.value.length > 0) {
+      modelSettings.value.quickAnalysisModel = selectDefaultModel(availableModels.value, null, 'quick') || ''
+      modelSettings.value.deepAnalysisModel = selectDefaultModel(availableModels.value, null, 'deep') || ''
+    } else {
+      modelSettings.value.quickAnalysisModel = ''
+      modelSettings.value.deepAnalysisModel = ''
+    }
   }
 }
 

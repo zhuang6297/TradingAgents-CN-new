@@ -972,7 +972,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Setting,
@@ -1080,8 +1080,11 @@ const loadTabData = async (tab: string) => {
       break
     case 'system':
       // 系统设置需要加载厂家和大模型配置，用于模型选择下拉框
+      // 必须先加载厂家和模型配置，再加载系统设置（因为需要验证模型是否存在）
       await loadProviders()
       await loadLLMConfigs()
+      // 确保模型配置已加载后再加载系统设置
+      await nextTick()
       await loadSystemSettings()
       break
     case 'api-keys':
@@ -1307,6 +1310,45 @@ const loadDatabaseConfigs = async () => {
   }
 }
 
+// 从可用模型列表中选择合适的默认模型
+const selectDefaultModelForSettings = (models: any[], preferredModel: string | null, role: 'quick' | 'deep'): string => {
+  if (!models || models.length === 0) return ''
+  
+  // 如果首选模型存在且已启用，使用它
+  if (preferredModel) {
+    const preferred = models.find(m => m.model_name === preferredModel)
+    if (preferred) {
+      return preferred.model_name
+    }
+  }
+  
+  // 根据角色选择合适的模型
+  if (role === 'quick') {
+    const quickModels = models.filter(m => 
+      m.suitable_roles?.includes('quick_analysis') || 
+      m.suitable_roles?.includes('both') ||
+      (m.capability_level && m.capability_level <= 2)
+    )
+    if (quickModels.length > 0) {
+      quickModels.sort((a, b) => (a.capability_level || 5) - (b.capability_level || 5))
+      return quickModels[0].model_name
+    }
+  } else {
+    const deepModels = models.filter(m => 
+      m.suitable_roles?.includes('deep_analysis') || 
+      m.suitable_roles?.includes('both') ||
+      (m.capability_level && m.capability_level >= 3)
+    )
+    if (deepModels.length > 0) {
+      deepModels.sort((a, b) => (b.capability_level || 1) - (a.capability_level || 1))
+      return deepModels[0].model_name
+    }
+  }
+  
+  // 如果都没有匹配的，返回第一个可用模型
+  return models[0]?.model_name || ''
+}
+
 const loadSystemSettings = async () => {
   systemLoading.value = true
   try {
@@ -1314,10 +1356,27 @@ const loadSystemSettings = async () => {
       configApi.getSystemSettings(),
       configApi.getSystemSettingsMeta()
     ])
+    
+    // 获取当前默认供应商的可用模型列表
+    const defaultProvider = settings.default_provider || ''
+    const availableModels = defaultProvider ? availableModelsForProvider(defaultProvider) : []
+    
+    // 验证并选择实际存在的模型
+    const quickModel = selectDefaultModelForSettings(
+      availableModels,
+      settings.quick_analysis_model,
+      'quick'
+    )
+    const deepModel = selectDefaultModelForSettings(
+      availableModels,
+      settings.deep_analysis_model,
+      'deep'
+    )
+    
     // 确保有默认值
     systemSettings.value = {
-      quick_analysis_model: 'qwen-turbo',
-      deep_analysis_model: 'qwen-max',
+      quick_analysis_model: quickModel,
+      deep_analysis_model: deepModel,
       default_analysis_timeout: 300,
       enable_cache: true,
       cache_ttl: 3600,
@@ -1346,7 +1405,10 @@ const loadSystemSettings = async () => {
       ta_google_news_sleep_max_seconds: 6.0,
       app_timezone: 'Asia/Shanghai',
 
-      ...settings
+      ...settings,
+      // 覆盖模型设置，确保使用实际存在的模型
+      quick_analysis_model: quickModel || settings.quick_analysis_model || '',
+      deep_analysis_model: deepModel || settings.deep_analysis_model || ''
     }
     // 规整元数据为map
     const metaList = meta?.items || []
