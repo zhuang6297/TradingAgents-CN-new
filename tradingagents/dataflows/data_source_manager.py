@@ -1731,7 +1731,7 @@ def get_china_stock_data_unified(symbol: str, start_date: str, end_date: str) ->
         str: 格式化的股票数据
     """
     from tradingagents.utils.logging_init import get_logger
-
+    logger = get_logger('data_source_manager')
 
     # 添加详细的股票代码追踪日志
     logger.info(f"🔍 [股票代码追踪] data_source_manager.get_china_stock_data_unified 接收到的股票代码: '{symbol}' (类型: {type(symbol)})")

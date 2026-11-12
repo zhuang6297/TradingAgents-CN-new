@@ -11,7 +11,15 @@ import random
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import re
-from bs4 import BeautifulSoup
+
+# 尝试导入bs4，如果失败则设置为None
+try:
+    from bs4 import BeautifulSoup
+    bs4_available = True
+except ImportError:
+    BeautifulSoup = None
+    bs4_available = False
+
 import pandas as pd
 
 

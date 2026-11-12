@@ -1224,9 +1224,9 @@ def get_china_stock_data_unified(
     start_time = time.time()
 
     try:
-        from .data_source_manager import get_china_stock_data_unified
+        from .data_source_manager import get_china_stock_data_unified as get_data_from_manager
 
-        result = get_china_stock_data_unified(ticker, start_date, end_date)
+        result = get_data_from_manager(ticker, start_date, end_date)
 
         # 记录详细的输出结果
         duration = time.time() - start_time
@@ -1289,11 +1289,11 @@ def get_china_stock_info_unified(
         str: 股票基本信息
     """
     try:
-        from .data_source_manager import get_china_stock_info_unified
+        from .data_source_manager import get_china_stock_info_unified as get_info_from_manager
 
         logger.info(f"📊 [统一接口] 获取{ticker}基本信息...")
 
-        info = get_china_stock_info_unified(ticker)
+        info = get_info_from_manager(ticker)
 
         if info and info.get('name'):
             result = f"股票代码: {ticker}\n"

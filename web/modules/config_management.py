@@ -4,11 +4,16 @@
 """
 
 import streamlit as st
-import pandas as pd
 from datetime import datetime, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
 from typing import List
+
+# 尝试导入pandas，如果失败则设置为None
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 
 # 添加项目根目录到路径
 import sys
@@ -63,7 +68,7 @@ def render_model_config():
     st.markdown("**当前模型配置**")
     
     if models:
-        # 创建DataFrame显示
+        # 创建数据显示
         model_data = []
         env_status = config_manager.get_env_config_status()
 
@@ -84,54 +89,57 @@ def render_model_config():
                 "状态": "✅ 启用" if model.enabled else "❌ 禁用"
             })
         
-        df = pd.DataFrame(model_data)
-        st.dataframe(df, use_container_width=True)
-        
-        # 编辑模型配置
-        st.markdown("**编辑模型配置**")
-        
-        # 选择要编辑的模型
-        model_options = [f"{m.provider} - {m.model_name}" for m in models]
-        selected_model_idx = st.selectbox("选择要编辑的模型", range(len(model_options)),
-                                         format_func=lambda x: model_options[x],
-                                         key="select_model_to_edit")
-        
-        if selected_model_idx is not None:
-            model = models[selected_model_idx]
+        # 无论pandas是否可用，都使用列表显示，避免pyarrow依赖问题
+        st.markdown("**当前模型配置**")
+        for item in model_data:
+            st.markdown(f"- **{item['序号']}**: {item['供应商']} - {item['模型名称']} ({item['状态']})")
+    
+    # 编辑模型配置
+    st.markdown("**编辑模型配置**")
+    
+    # 选择要编辑的模型
+    model_options = [f"{m.provider} - {m.model_name}" for m in models]
+    selected_model_idx = st.selectbox("选择要编辑的模型", range(len(model_options)),
+                                     format_func=lambda x: model_options[x],
+                                     key="select_model_to_edit")
+    
+    if selected_model_idx is not None:
+        model = models[selected_model_idx]
 
-            # 检查是否来自.env
-            env_has_key = env_status["api_keys"].get(model.provider.lower(), False)
+        # 检查是否来自.env
+        env_status = config_manager.get_env_config_status()
+        env_has_key = env_status["api_keys"].get(model.provider.lower(), False)
+        if env_has_key:
+            st.info(f"💡 此模型的API密钥来自 .env 文件，修改 .env 文件后需重启应用生效")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            new_api_key = st.text_input("API密钥", value=model.api_key, type="password", key=f"edit_api_key_{selected_model_idx}")
             if env_has_key:
-                st.info(f"💡 此模型的API密钥来自 .env 文件，修改 .env 文件后需重启应用生效")
+                st.caption("⚠️ 此密钥来自 .env 文件，Web修改可能被覆盖")
+            new_max_tokens = st.number_input("最大Token数", value=model.max_tokens, min_value=1000, max_value=32000, key=f"edit_max_tokens_{selected_model_idx}")
+            new_temperature = st.slider("温度参数", 0.0, 2.0, model.temperature, 0.1, key=f"edit_temperature_{selected_model_idx}")
 
-            col1, col2 = st.columns(2)
-
-            with col1:
-                new_api_key = st.text_input("API密钥", value=model.api_key, type="password", key=f"edit_api_key_{selected_model_idx}")
-                if env_has_key:
-                    st.caption("⚠️ 此密钥来自 .env 文件，Web修改可能被覆盖")
-                new_max_tokens = st.number_input("最大Token数", value=model.max_tokens, min_value=1000, max_value=32000, key=f"edit_max_tokens_{selected_model_idx}")
-                new_temperature = st.slider("温度参数", 0.0, 2.0, model.temperature, 0.1, key=f"edit_temperature_{selected_model_idx}")
-
-            with col2:
-                new_enabled = st.checkbox("启用模型", value=model.enabled, key=f"edit_enabled_{selected_model_idx}")
-                new_base_url = st.text_input("自定义API地址 (可选)", value=model.base_url or "", key=f"edit_base_url_{selected_model_idx}")
+        with col2:
+            new_enabled = st.checkbox("启用模型", value=model.enabled, key=f"edit_enabled_{selected_model_idx}")
+            new_base_url = st.text_input("自定义API地址 (可选)", value=model.base_url or "", key=f"edit_base_url_{selected_model_idx}")
+        
+        if st.button("保存配置", type="primary", key=f"save_model_config_{selected_model_idx}"):
+            # 更新模型配置
+            models[selected_model_idx] = ModelConfig(
+                provider=model.provider,
+                model_name=model.model_name,
+                api_key=new_api_key,
+                base_url=new_base_url if new_base_url else None,
+                max_tokens=new_max_tokens,
+                temperature=new_temperature,
+                enabled=new_enabled
+            )
             
-            if st.button("保存配置", type="primary", key=f"save_model_config_{selected_model_idx}"):
-                # 更新模型配置
-                models[selected_model_idx] = ModelConfig(
-                    provider=model.provider,
-                    model_name=model.model_name,
-                    api_key=new_api_key,
-                    base_url=new_base_url if new_base_url else None,
-                    max_tokens=new_max_tokens,
-                    temperature=new_temperature,
-                    enabled=new_enabled
-                )
-                
-                config_manager.save_models(models)
-                st.success("✅ 配置已保存！")
-                st.rerun()
+            config_manager.save_models(models)
+            st.success("✅ 配置已保存！")
+            st.rerun()
     
     else:
         st.warning("没有找到模型配置")
@@ -192,8 +200,9 @@ def render_pricing_config():
                 "货币": pricing.currency
             })
         
-        df = pd.DataFrame(pricing_data)
-        st.dataframe(df, use_container_width=True)
+        # 无论pandas是否可用，都使用列表显示，避免pyarrow依赖问题
+        for item in pricing_data:
+            st.markdown(f"- **{item['序号']}**: {item['供应商']} - {item['模型名称']} (输入: {item['输入价格 (每1K token)']}, 输出: {item['输出价格 (每1K token)']})")
         
         # 编辑定价
         st.markdown("**编辑定价**")
@@ -320,8 +329,9 @@ def render_usage_statistics():
                 "平均成本/请求": f"¥{data['cost']/data['requests']:.6f}" if data['requests'] > 0 else "¥0"
             })
         
-        df = pd.DataFrame(provider_data)
-        st.dataframe(df, use_container_width=True)
+        # 无论pandas是否可用，都使用列表显示，避免pyarrow依赖问题
+        for item in provider_data:
+            st.markdown(f"- **{item['供应商']}**: 成本 ¥{item['成本']}, 请求数 {item['请求数']}, 输入Token {item['输入Token']}, 输出Token {item['输出Token']}")
         
         # 成本分布饼图
         if len(provider_data) > 1:
@@ -350,36 +360,10 @@ def render_usage_statistics():
                 continue
         
         if daily_stats:
-            dates = sorted(daily_stats.keys())
-            costs = [daily_stats[date]["cost"] for date in dates]
-            requests = [daily_stats[date]["requests"] for date in dates]
-            
-            # 创建双轴图表
-            fig = go.Figure()
-            
-            fig.add_trace(go.Scatter(
-                x=dates, y=costs,
-                mode='lines+markers',
-                name='每日成本 (¥)',
-                yaxis='y'
-            ))
-            
-            fig.add_trace(go.Scatter(
-                x=dates, y=requests,
-                mode='lines+markers',
-                name='每日请求数',
-                yaxis='y2'
-            ))
-            
-            fig.update_layout(
-                title='使用趋势',
-                xaxis_title='日期',
-                yaxis=dict(title='成本 (¥)', side='left'),
-                yaxis2=dict(title='请求数', side='right', overlaying='y'),
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+            # 使用简单列表显示，避免pyarrow依赖问题
+            st.markdown("**每日使用统计**")
+            for date in sorted(daily_stats.keys()):
+                st.markdown(f"- **{date}**: 成本 ¥{daily_stats[date]['cost']:.4f}, 请求数 {daily_stats[date]['requests']}")
 
 
 def render_system_settings():

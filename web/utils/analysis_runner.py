@@ -210,15 +210,22 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
     update_progress("检查环境变量配置...")
     dashscope_key = os.getenv("DASHSCOPE_API_KEY")
     finnhub_key = os.getenv("FINNHUB_API_KEY")
+    deepseek_key = os.getenv("DEEPSEEK_API_KEY")
 
     logger.info(f"环境变量检查:")
     logger.info(f"  DASHSCOPE_API_KEY: {'已设置' if dashscope_key else '未设置'}")
     logger.info(f"  FINNHUB_API_KEY: {'已设置' if finnhub_key else '未设置'}")
+    logger.info(f"  DEEPSEEK_API_KEY: {'已设置' if deepseek_key else '未设置'}")
 
-    if not dashscope_key:
+    # 根据LLM提供商验证必要的API密钥
+    if llm_provider == "dashscope" and not dashscope_key:
         raise ValueError("DASHSCOPE_API_KEY 环境变量未设置")
-    if not finnhub_key:
-        raise ValueError("FINNHUB_API_KEY 环境变量未设置")
+    if llm_provider == "deepseek" and not deepseek_key:
+        raise ValueError("DEEPSEEK_API_KEY 环境变量未设置")
+    
+    # FINNHUB_API_KEY 仅在分析美股时需要
+    if market_type == "美股" and not finnhub_key:
+        raise ValueError("FINNHUB_API_KEY 环境变量未设置（分析美股需要）")
 
     update_progress("环境变量验证通过")
 

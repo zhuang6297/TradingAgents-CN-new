@@ -1,10 +1,17 @@
 import json
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
 import time
 import random
 import os
+
+# 尝试导入bs4，如果失败则设置为None
+try:
+    from bs4 import BeautifulSoup
+    bs4_available = True
+except ImportError:
+    BeautifulSoup = None
+    bs4_available = False
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -48,6 +55,11 @@ def getNewsData(query, start_date, end_date):
     start_date: str - start date in the format yyyy-mm-dd or mm/dd/yyyy
     end_date: str - end date in the format yyyy-mm-dd or mm/dd/yyyy
     """
+    # 如果bs4不可用，返回空列表
+    if not bs4_available:
+        logger.warning("bs4模块不可用，无法获取Google新闻")
+        return []
+    
     if "-" in start_date:
         start_date = datetime.strptime(start_date, "%Y-%m-%d")
         start_date = start_date.strftime("%m/%d/%Y")
